@@ -1,0 +1,491 @@
+
+
+#include "common.h"
+
+void MatrixMultiply(float* A, float* B, int m, int p, int n, float* C)
+{
+  // A = input matrix (m x p)
+  // B = input matrix (p x n)
+  // m = number of rows in A
+  // p = number of columns in A = number of rows in B
+  // n = number of columns in B
+  // C = output matrix = A*B (m x n)
+  int i, j, k;
+  for (i=0;i<m;i++)
+    for(j=0;j<n;j++)
+    {
+      C[n*i+j]=0;
+      for (k=0;k<p;k++)
+        C[n*i+j]= C[n*i+j]+A[p*i+k]*B[n*k+j];
+    }
+}
+
+void MatrixAdd(float* A, float* B, int m, int n, float* C)
+{
+  // A = input matrix (m x n)
+  // B = input matrix (m x n)
+  // m = number of rows in A = number of rows in B
+  // n = number of columns in A = number of columns in B
+  // C = output matrix = A+B (m x n)
+  int i, j;
+  for (i=0;i<m;i++)
+    for(j=0;j<n;j++)
+      C[n*i+j]=A[n*i+j]+B[n*i+j];
+}
+
+
+void SendMotorPacket(char addr, char cmd, char data) 
+{ 
+  SabertoothSerial.write(addr);   
+  SabertoothSerial.write(cmd);   
+  SabertoothSerial.write(data); 
+  SabertoothSerial.write((addr + cmd + data) & 127); 
+} 
+
+// number of days since 2000/01/01, valid for 2001..2099
+static uint16_t date2days(uint16_t y, uint8_t m, uint8_t d) {
+    if (y >= 2000)
+        y -= 2000;
+    uint16_t days = d;
+    for (uint8_t i = 1; i < m; ++i)
+        days += pgm_read_byte(daysInMonth + i - 1);
+    if (m > 2 && y % 4 == 0)
+        ++days;
+    return days + 365 * y + (y + 3) / 4 - 1;
+}
+
+static long time2long(uint16_t days, uint8_t h, uint8_t m, uint8_t s) {
+    return ((days * 24L + h) * 60 + m) * 60 + s;
+}
+
+void InitializePID()
+{
+  pidLeftMotorVel.SetOutputLimits(-100,100);
+  pidRightMotorVel.SetOutputLimits(-100,100);
+
+  pidLeftMotorVel.SetSampleTime(MOTOR_PID_RATE);
+  pidRightMotorVel.SetSampleTime(MOTOR_PID_RATE);
+
+  pidLeftMotorVel.SetMode(AUTOMATIC);
+  pidRightMotorVel.SetMode(AUTOMATIC);
+}
+
+void InitializeIMU()
+{
+  if(!bno.begin())
+  {
+
+  }
+
+  delay(1000);
+ 
+  bno.setExtCrystalUse(true);
+}
+
+void setLeftMotorPower(float power)
+{
+  if (power > 100.0)
+    power = 100.0;
+    
+  if (power < -100.0)
+    power = -100.0;
+    
+  char val = map(abs(power), 0, 100, 0, 127); 
+  if (power >= 0.0)
+  {
+    SendMotorPacket(SABERTOOTH_ADDR, SABERTOOTH_CMD_MOTOR2_FWD, val);
+  }
+  else
+  {
+    SendMotorPacket(SABERTOOTH_ADDR, SABERTOOTH_CMD_MOTOR2_REV, val);
+  }
+}
+
+
+void setRightMotorPower(float power)
+{
+  if (power > 100.0)
+    power = 100.0;
+    
+  if (power < -100.0)
+    power = -100.0;
+    
+  char val = map(abs(power), 0, 100, 0, 127); 
+  if (power >= 0.0)
+  {
+    SendMotorPacket(SABERTOOTH_ADDR, SABERTOOTH_CMD_MOTOR1_FWD, val);
+  }
+  else
+  {
+    SendMotorPacket(SABERTOOTH_ADDR, SABERTOOTH_CMD_MOTOR1_REV, val);
+  }
+}
+
+
+void printDebug()
+{
+  char output[150];
+  
+  //sprintf(output,"%i-%i-%i  %i:%i:%i ** %f - %f",GPS.month, GPS.day, GPS.year, GPS.hour, GPS.minute, GPS.seconds,(float)setpointRightVel,(float)motorRightOutput);
+  
+  sprintf(output, "Heading: %f - %f - %f\nLeft Setpoint: %f\nLeft Output: %f\nLeftVel: %f\nRight Setpoint: %f\nRight Output: %f\nRightVel: %f\n",  (float)currentHeading, sin(currentHeading / 2.0), cos(currentHeading / 2.0),(float)setpointLeftVel,(float)motorLeftOutput, (float)currentLeftVel, (float)setpointRightVel,(float)motorRightOutput,(float)currentRightVel);
+
+  debug.data = output;
+  pubDebug.publish( &debug );
+}
+
+void updateMotors()
+{
+  setLeftMotorPower(motorLeftOutput);
+  setRightMotorPower(motorRightOutput);
+}
+
+void checkTimers()
+{
+  if (millis() - timerMotorTimeout > TIMEOUT_MOTOR_CMD)
+  {
+    motorLeftOutput = 0.0f;
+    motorRightOutput = 0.0f;
+    setpointLeftVel = 0.0f;
+    setpointRightVel = 0.0f;
+    
+    updateMotors();
+    
+  }
+
+  if (millis() - timerMotorUpdate > UPDATE_RATE_MOTOR)
+  {
+    timerMotorUpdate = millis();
+    updateMotors();
+  }
+
+  if (millis() - timerEncoder > UPDATE_RATE_ENCODER)
+  {
+    timerEncoder = millis();
+    updateEncoders();
+    
+  }
+  
+  if (millis() - timerIMU > UPDATE_RATE_IMU)
+  {
+   timerIMU = millis();
+   
+   publishIMU();
+  }
+
+  if (millis() - timerDebug > UPDATE_RATE_DEBUG)
+  {
+   timerDebug = millis();
+   printDebug();
+  }
+  
+}
+
+void MotorControl_cb( const geometry_msgs::Twist &msg)
+{
+  
+  timerMotorTimeout = millis();
+
+
+  // Compute wheels velocities:
+  //setpointLeftVel = (msg.linear.x - msg.angular.z * ws / 2.0)/wr;
+  //setpointRightVel = (msg.linear.x + msg.angular.z * ws / 2.0)/wr;
+  if (msg.linear.x == 0.0)
+  {
+    setpointRightVel = msg.angular.z * BASE_WIDTH / 2.0;
+    setpointLeftVel = -setpointRightVel;
+  }
+  else if (msg.angular.z == 0.0)
+  {
+    setpointRightVel = msg.linear.x;
+    setpointLeftVel = msg.linear.x;
+  }
+  else
+  {
+    setpointRightVel = msg.linear.x + msg.angular.z * BASE_WIDTH / 2.0;
+    setpointLeftVel = msg.linear.x - msg.angular.z * BASE_WIDTH / 2.0;
+  }
+
+  //setpointRightVel = msg.linear.x + msg.angular.z * ws / 2.0;
+  //setpointLeftVel = msg.linear.x - msg.angular.z * ws / 2.0;
+
+  
+}
+
+//ros::Subscriber<std_msgs::Float32> subLeftMotorVelSetPoint("lwheel_vtarget", LeftMotorVel_cb);
+//ros::Subscriber<std_msgs::Float32> subRightMotorVelSetPoint("rwheel_vtarget", RightMotorVel_cb);
+
+//ros::Subscriber<std_msgs::Float32> subLeftMotorCmd("lmotor_cmd", LeftMotorCmd_cb);
+//ros::Subscriber<std_msgs::Float32> subRightMotorCmd("rmotor_cmd", RightMotorCmd_cb);
+ros::Subscriber<geometry_msgs::Twist> subVel("cmd_vel", MotorControl_cb);
+//ros::Subscriber<geometry_msgs::Vector3> subWheel("wheel_encoder", WheelCallback,100);
+
+
+void setup() {
+
+  Wire.begin(); // join i2c bus (address optional for master)
+  delayMicroseconds(10000); //wait for motor driver to initialization
+  SabertoothSerial.begin(9600);
+  delay(2000);
+  SendMotorPacket(SABERTOOTH_ADDR,SABERTOOTH_CMD_MIN_VOLTAGE, MIN_VOLTAGE_VAL);
+  SendMotorPacket(SABERTOOTH_ADDR,SABERTOOTH_CMD_TIMEOUT, CMD_TIMEOUT_VAL);
+
+  
+  
+  //changeAutoTune();
+  /*setLeftMotorPower(50);
+  setRightMotorPower(50);
+  delay(1000);*/
+  
+  InitializePID();
+
+  nh.initNode();
+  broadcaster.init(nh);
+
+  nh.advertise(pubIMU);
+  nh.advertise(pubDebug);
+  nh.advertise(pubOdom);
+
+  nh.subscribe(subVel);
+  
+  InitializeIMU();
+}
+
+
+void publishIMU()
+{
+  imu::Vector<3> accel = bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
+  imu::Vector<3> gyro = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE );
+  imu::Quaternion quat = bno.getQuat();
+  //int8_t temp = bno.getTemp();
+
+  imuMsg.linear_acceleration.x = accel.x();
+  imuMsg.linear_acceleration.y = accel.y();
+  imuMsg.linear_acceleration.z = accel.z();
+  //imuMsg.linear_acceleration_covariance = { 0.04 , 0 , 0, 0 , 0.04, 0, 0 , 0 , 0.04 };
+  imuMsg.linear_acceleration_covariance[0] = 0.04;
+  imuMsg.linear_acceleration_covariance[4] = 0.04;
+  imuMsg.linear_acceleration_covariance[8] = 0.04;
+
+ 
+  imuMsg.angular_velocity.x = gyro.x();
+  imuMsg.angular_velocity.y = gyro.y();
+  imuMsg.angular_velocity.z = gyro.z();
+  //imuMsg.angular_velocity_covariance = { 0.02, 0 , 0, 0 , 0.02, 0, 0 , 0 , 0.02 };
+  imuMsg.angular_velocity_covariance[0] = 0.02;
+  imuMsg.angular_velocity_covariance[4] = 0.02;
+  imuMsg.angular_velocity_covariance[8] = 0.02;
+
+  imuMsg.orientation.x = quat.x();
+  imuMsg.orientation.y = quat.y();
+  imuMsg.orientation.z = -quat.z();
+  imuMsg.orientation.w = quat.w();
+  //imuMsg.orientation_covariance = { 0.0025 , 0 , 0, 0, 0.0025, 0, 0, 0, 0.0025 };
+  imuMsg.orientation_covariance[0] = 0.0025;
+  imuMsg.orientation_covariance[4] = 0.0025;
+  imuMsg.orientation_covariance[8] = 0.0025;
+
+  char id[] = "imu_link";
+  imuMsg.header.frame_id = id;
+  imuMsg.header.stamp=nh.now();
+  imuMsg.header.seq = seq;
+  seq = seq + 1;
+  pubIMU.publish(&imuMsg);
+}
+
+double getAverage(double input[], int n)
+{
+  double total = 0;
+  for (int i=0;i<n;i++)
+  {
+    total += input[i];
+  }
+  return total / n;
+}
+
+void integrateRungeKutta2(double linear, double angular)
+{
+  const double direction = currentHeading + angular * 0.5;
+
+  /// Runge-Kutta 2nd order integration:
+  currentX       += linear * cos(direction);
+  currentY       += linear * sin(direction);
+  currentHeading += angular;
+}
+
+void integrateExact(double linear, double angular)
+  {
+    if (fabs(angular) < 1e-6)
+      integrateRungeKutta2(linear, angular);
+    else
+    {
+      /// Exact integration (should solve problems when angular is zero):
+      const double heading_old = currentHeading;
+      const double r = linear/angular;
+      currentHeading += angular;
+      currentX       +=  r * (sin(currentHeading) - sin(heading_old));
+      currentY       += -r * (cos(currentHeading) - cos(heading_old));
+    }
+  }
+
+
+void updateEncoders()
+{
+  long curEncoderTime =  millis();
+
+  long countLeft = -encoderLF.read();
+  long countRight = encoderRF.read();
+  
+  long deltaLeft = countLeft - countPrevEncoderLeft;
+  long deltaRight = countRight - countPrevEncoderRight;
+ 
+  float deltaT = (curEncoderTime - prevEncoderTime) / 1000.0;
+
+  double deltaLeftDist = (float)deltaLeft / COUNT_PER_METER;
+  double deltaRightDist = (float)deltaRight / COUNT_PER_METER;
+
+  double leftVel = deltaLeftDist / deltaT;
+  double rightVel = deltaRightDist / deltaT;
+
+  countPrevEncoderLeft = countLeft;
+  countPrevEncoderRight = countRight;
+  prevEncoderTime = curEncoderTime;
+  
+  currentVelX = 0.5 * (leftVel + rightVel);
+  double W = (rightVel - leftVel) / BASE_WIDTH;
+  
+  float updatePose[3][1] = { {currentX}, {currentY}, {currentHeading} };
+
+  //else if (fabs(setpointLeftVel) == fabs(setpointRightVel))
+  /*else if (setpointLeftVel == -setpointRightVel)
+  {
+    updatePose[0][0] = currentX;
+    updatePose[0][1] = currentY;
+    updatePose[0][2] = currentHeading - 2*currentVelX*deltaT /  BASE_WIDTH;;
+  }*/
+
+  if (setpointLeftVel == setpointRightVel)
+  {
+    updatePose[0][0] = currentX + currentVelX * cos(currentHeading) * deltaT;
+    updatePose[0][1] = currentY + currentVelX * sin(currentHeading) * deltaT;
+    updatePose[0][2] = currentHeading;
+
+    currentX = (double)(updatePose[0][0]);
+  currentY = (double)updatePose[0][1];
+  currentHeading = (double)updatePose[0][2];
+  }
+  
+  else if (setpointLeftVel == -setpointRightVel)
+  {
+    updatePose[0][0] = currentX;
+    updatePose[0][1] = currentY;
+    updatePose[0][2] = currentHeading + 2*rightVel*deltaT /  BASE_WIDTH;
+
+      currentX = (double)(updatePose[0][0]);
+    currentY = (double)updatePose[0][1];
+    currentHeading = (double)updatePose[0][2];
+  }
+  else
+  {
+    /*updatePose[0][0] = currentX;
+    updatePose[0][1] = currentY;
+    updatePose[0][2] = currentHeading;*/
+    
+    /*double R = 0.5 * ( (leftVel + rightVel) / (rightVel - leftVel) );
+    
+  
+    double tmpCos = cos(W * deltaT);
+    double tmpSin = sin(W * deltaT);
+  
+  
+    double iccX = currentX - R*sin(currentHeading);
+    double iccY = currentY + R*sin(currentHeading);
+  
+    float updatePose[3][1] = { {0}, {0}, {0} };
+    float tmp[3][1] = { {0}, {0}, {0} };
+    float rotMatrix[3][3] = { {tmpCos, -tmpSin, 0.0}, {tmpSin, tmpCos, 0.0},{0,0,1} };
+    float iccMatrix[3][1] = { {currentX - iccX}, {currentY - iccY}, currentHeading};
+    float iccPoint[3][1] = { {iccX}, {iccY}, {W*deltaT} };
+  
+    MatrixMultiply((float*)rotMatrix,(float*)iccMatrix,3,3,1,(float*)tmp);
+    MatrixAdd((float*)tmp, (float*)iccPoint,3,1,(float*)updatePose);*/
+    integrateExact(currentVelX*deltaT, W*deltaT);
+    
+  }
+
+  /*currentX = (double)(updatePose[0][0]);
+  currentY = (double)updatePose[0][1];
+  currentHeading = (double)updatePose[0][2];*/
+
+  currentLeftVel = leftVel;
+  currentRightVel = rightVel;
+
+  
+  currentVelAng = W;
+  
+  /*float avgDist = (deltaLeftDist + deltaRightDist) * 0.5;
+  float th = (deltaRightDist - deltaLeftDist) / BASE_WIDTH;
+  prevTh = th;
+  prevDT = deltaT;
+
+  integrateExact(avgDist,th);
+
+  historyLeftVel[sampleIndex] = deltaLeftDist / deltaT;
+  historyRightVel[sampleIndex] = deltaRightDist / deltaT;
+  
+  historyVelX[sampleIndex] = avgDist / deltaT;
+  historyVelAng[sampleIndex] = th / deltaT;
+
+  sampleIndex = (sampleIndex + 1) % MAX_SAMPLES;
+  if(sampleCount < MAX_SAMPLES)      
+    sampleCount++;
+
+  currentLeftVel = getAverage(historyLeftVel, sampleCount);
+  currentRightVel = getAverage(historyRightVel, sampleCount);
+  currentVelX = getAverage(historyVelX, sampleCount);
+  currentVelAng = getAverage(historyVelAng, sampleCount);*/
+
+  
+
+  odomData.header.stamp = nh.now();
+  odomData.header.frame_id = odom;
+  odomData.header.seq = seq;
+  seq += 1;
+  //set the position
+  odomData.pose.pose.position.x = currentX;
+  odomData.pose.pose.position.y = currentY;
+  odomData.pose.pose.position.z = 0.0;
+
+  odomData.pose.pose.orientation.x = 0;
+  odomData.pose.pose.orientation.y = 0;
+  odomData.pose.pose.orientation.z = sin(currentHeading / 2.0);
+  odomData.pose.pose.orientation.w = cos(currentHeading / 2.0);
+
+  odomData.pose.covariance[0] = 0.00001;
+  odomData.pose.covariance[7] = 0.00001;
+  odomData.pose.covariance[14] = 1000000000000.0;
+  odomData.pose.covariance[21] = 1000000000000.0;
+  odomData.pose.covariance[28] = 1000000000000.0;
+  odomData.pose.covariance[35] = 0.001;
+   
+  //set the velocity
+  odomData.child_frame_id = base_link;
+  odomData.twist.twist.linear.x = currentVelX;
+
+  odomData.twist.twist.angular.z = currentVelAng;
+  pubOdom.publish(&odomData);
+
+
+
+  
+  
+ 
+}
+
+void loop() {
+  checkTimers();
+  pidLeftMotorVel.Compute();
+  pidRightMotorVel.Compute();
+  nh.spinOnce();
+  delay(1);
+}
