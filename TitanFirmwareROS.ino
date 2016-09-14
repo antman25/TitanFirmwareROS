@@ -82,15 +82,15 @@ void updateMotors()
   setRightMotorPower(motorRightOutput);
 }
 
-void LeftMotorCmd_cb( const std_msgs::Float32 &msg)
+void LeftMotorCmd_cb( const std_msgs::Float64 &msg)
 {
-  motorLeftOutput = msg.data;
+  motorLeftOutput = (float)msg.data;
   updateMotors();
   timerMotorTimeout = millis();
 }
-void RightMotorCmd_cb( const std_msgs::Float32 &msg)
+void RightMotorCmd_cb( const std_msgs::Float64 &msg)
 {
-  motorRightOutput = msg.data;
+  motorRightOutput = (float)msg.data;
   updateMotors();
   timerMotorTimeout = millis();
 }
@@ -131,8 +131,8 @@ void checkTimers()
   
 }
 
-ros::Subscriber<std_msgs::Float32> subLeftMotorCmd("lmotor_cmd", LeftMotorCmd_cb);
-ros::Subscriber<std_msgs::Float32> subRightMotorCmd("rmotor_cmd", RightMotorCmd_cb);
+ros::Subscriber<std_msgs::Float64> subLeftMotorCmd("lmotor_cmd", LeftMotorCmd_cb);
+ros::Subscriber<std_msgs::Float64> subRightMotorCmd("rmotor_cmd", RightMotorCmd_cb);
 
 
 

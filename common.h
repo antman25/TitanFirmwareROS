@@ -23,6 +23,7 @@
 #include <std_msgs/Int32.h>
 #include <std_msgs/Int64.h>
 #include <std_msgs/Float32.h>
+#include <std_msgs/Float64.h>
 
 #define PIN_ENCODER_LF_A  20
 #define PIN_ENCODER_LF_B  21
