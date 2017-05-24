@@ -1,9 +1,6 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
 #include <utility/imumaths.h>
-#include <Wire.h>
-#include <Encoder.h>
-
 
 #include <ros.h>
 #include <ros/time.h>
@@ -11,7 +8,10 @@
 #include <tf/transform_broadcaster.h>
 #include <tf/tf.h>
 
+ #include <nav_msgs/Odometry.h>
+
 #include <sensor_msgs/Imu.h>
+#include <sensor_msgs/MagneticField.h>
 
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/Vector3.h>
@@ -24,81 +24,81 @@
 #include <std_msgs/Int64.h>
 #include <std_msgs/Float32.h>
 #include <std_msgs/Float64.h>
-
-#define PIN_ENCODER_LF_A  20
-#define PIN_ENCODER_LF_B  21
-
-#define PIN_ENCODER_LR_A  22
-#define PIN_ENCODER_LR_B  23
-
-#define PIN_ENCODER_RF_A  14
-#define PIN_ENCODER_RF_B  15
-
-#define PIN_ENCODER_RR_A  16
-#define PIN_ENCODER_RR_B  17
-
-
-Encoder encoderLF(PIN_ENCODER_LF_A, PIN_ENCODER_LF_B); 
-Encoder encoderLR(PIN_ENCODER_LR_A, PIN_ENCODER_LR_B); 
-
-Encoder encoderRF(PIN_ENCODER_RF_A, PIN_ENCODER_RF_B); 
-Encoder encoderRR(PIN_ENCODER_RR_A, PIN_ENCODER_RR_B);
+#include "RoboClaw.h"
 
 ros::NodeHandle nh;
 sensor_msgs::Imu imuMsg;
+sensor_msgs::MagneticField magMsg;
 
 std_msgs::String debug;
 
-std_msgs::Int64 encoderLeftVal;
-std_msgs::Int64 encoderRightVal;
+std_msgs::Int64 encoderFrontLeftVal;
+std_msgs::Int64 encoderFrontRightVal;
+std_msgs::Int64 encoderRearLeftVal;
+std_msgs::Int64 encoderRearRightVal;
 
-ros::Publisher pubIMU("imu_data", &imuMsg);
+std_msgs::Float32 voltageFrontLogicVal;
+std_msgs::Float32 voltageRearLogicVal;
+
+std_msgs::Float32 voltageFrontMainVal;
+std_msgs::Float32 voltageRearMainVal;
+
+std_msgs::Float32 currentFrontLeftVal;
+std_msgs::Float32 currentFrontRightVal;
+std_msgs::Float32 currentRearLeftVal;
+std_msgs::Float32 currentRearRightVal;
+
+ros::Publisher pubIMU("imu/data_raw", &imuMsg);
+ros::Publisher pubMag("imu/mag", &magMsg);
 ros::Publisher pubDebug("debug", &debug);
 
 
-ros::Publisher pubLeftEncoder("lwheel_encoder", &encoderLeftVal);
-ros::Publisher pubRightEncoder("rwheel_encoder", &encoderRightVal);
+ros::Publisher pubFrontLeftEncoder("encoder_fl_wheel", &encoderFrontLeftVal);
+ros::Publisher pubFrontRightEncoder("encoder_fr_wheel", &encoderFrontRightVal);
+ros::Publisher pubRearLeftEncoder("encoder_rl_wheel", &encoderRearLeftVal);
+ros::Publisher pubRearRightEncoder("encoder_rr_wheel", &encoderRearRightVal);
+
+ros::Publisher pubVoltageFrontMain("voltage_front_main", &voltageFrontMainVal);
+ros::Publisher pubVoltageRearMain("voltage_rear_main", &voltageRearMainVal);
+
+ros::Publisher pubVoltageFrontLogic("voltage_front_logic", &voltageFrontLogicVal);
+ros::Publisher pubVoltageRearLogic("voltage_rear_logic", &voltageRearLogicVal);
+
+ros::Publisher pubCurrentFrontLeft("current_front_left", &currentFrontLeftVal);
+ros::Publisher pubCurrentFrontRight("current_rear_right", &currentFrontRightVal);
+ros::Publisher pubCurrentRearLeft("current_front_left", &currentRearLeftVal);
+ros::Publisher pubCurrentRearRight("current_rear_right", &currentRearRightVal);
+
 
 
 Adafruit_BNO055 bno = Adafruit_BNO055();
-
-#define SabertoothSerial      Serial1
-#define SABERTOOTH_ADDR       128
-
-#define SABERTOOTH_CMD_MOTOR1_FWD   1
-#define SABERTOOTH_CMD_MOTOR1_REV   0
-
-#define SABERTOOTH_CMD_MOTOR2_FWD   5
-#define SABERTOOTH_CMD_MOTOR2_REV   4
-
-#define SABERTOOTH_CMD_MIN_VOLTAGE  2
-#define SABERTOOTH_CMD_TIMEOUT      14
-
-#define CMD_TIMEOUT_VAL     10
-#define MIN_VOLTAGE         10
-
-#define MIN_VOLTAGE_VAL     (int)((MIN_VOLTAGE - 6.0) * 5.0)
+RoboClaw roboclaw(&Serial1,10000);
 
 long seq = 0;
 bool rosInitialized = false;
 
 
+#define UPDATE_RATE_IMU           50
+#define UPDATE_RATE_ENCODER       50
+#define UPDATE_RATE_DEBUG         1000
+#define UPDATE_RATE_MOTOR         50
+#define UPDATE_RATE_MOTOR_INFO    200
 
-#define UPDATE_RATE_IMU       50
-#define UPDATE_RATE_ENCODER   50
-#define UPDATE_RATE_DEBUG     1000
-#define UPDATE_RATE_MOTOR     100
+#define TIMEOUT_MOTOR_CMD         1000
 
-#define TIMEOUT_MOTOR_CMD     1000
+#define ROBOCLAW_FRONT_ID         0x80
+#define ROBOCLAW_REAR_ID          0x81
+
 
 long timerIMU = millis();
 long timerDebug = millis();
 long timerEncoder = millis();
 long timerMotorUpdate = millis();
 long timerMotorTimeout = millis();
+long timerMotorInfo = millis();
 
-
-
-double motorLeftOutput = 0.0F;
-double motorRightOutput = 0.0F;
+int spFrontLeftMotor = 0;
+int spFrontRightMotor = 0;
+int spRearLeftMotor = 0;
+int spRearRightMotor = 0;
 
