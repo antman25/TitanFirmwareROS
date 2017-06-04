@@ -13,15 +13,29 @@ void InitializeIMU()
   bno.setExtCrystalUse(true);
 }
 
+void InitializeGPS()
+{
+  GPS.begin(115200);
+  //GPS.sendCommand(PMTK_SET_BAUD_115200);
+  GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
+  
+  GPS.sendCommand(PMTK_SET_NMEA_UPDATE_10HZ); // 1 Hz update rate
+  GPS.sendCommand(PMTK_API_SET_FIX_CTL_5HZ);
+  GPS.sendCommand(PGCMD_ANTENNA);
+
+  delay(1000);
+}
+
+
 void publishDebug()
 {
   char output[80];
   
-  //sprintf(output,"%i-%i-%i  %i:%i:%i ** %f - %f",GPS.month, GPS.day, GPS.year, GPS.hour, GPS.minute, GPS.seconds,(float)setpointRightVel,(float)motorRightOutput);
+  sprintf(output,"%i-%i-%i  %i:%i:%i ** %f - %f",GPS.month, GPS.day, GPS.year, GPS.hour, GPS.minute, GPS.seconds,(float)GPS.lat,(float)GPS.lon);
   
   //sprintf(output, "Heading: %f - %f - %f\nLeft Setpoint: %f\nLeft Output: %f\nLeftVel: %f\nRight Setpoint: %f\nRight Output: %f\nRightVel: %f\n",  (float)currentHeading, sin(currentHeading / 2.0), cos(currentHeading / 2.0),(float)setpointLeftVel,(float)motorLeftOutput, (float)currentLeftVel, (float)setpointRightVel,(float)motorRightOutput,(float)currentRightVel);
   //sprintf(output,"Left: %f  -- Right: %f\n",motorLeftOutput,motorRightOutput);
-  sprintf(output,"%i - %i - %i - %i\n", spFrontLeftMotor, spFrontRightMotor, spRearLeftMotor, spRearRightMotor);
+  //sprintf(output,"%i - %i - %i - %i\n", spFrontLeftMotor, spFrontRightMotor, spRearLeftMotor, spRearRightMotor);
   debug.data = output;
   pubDebug.publish( &debug );
 }
@@ -134,6 +148,7 @@ ros::Subscriber<std_msgs::Int64> subRearRightMotorCmd("vel_sp_rr_wheel", cbRearR
 
 void setup() {
   roboclaw.begin(57600);
+  
   nh.initNode();
   //broadcaster.init(nh);
 
@@ -142,8 +157,10 @@ void setup() {
   nh.advertise(pubRearLeftEncoder);
   nh.advertise(pubRearRightEncoder);
   
-  nh.advertise(pubIMU);
+  nh.advertise(pubIMURaw);
+  nh.advertise(pubIMUFiltered);
   nh.advertise(pubMag);
+  nh.advertise(pubTemp);
   nh.advertise(pubDebug);
 
  
@@ -164,6 +181,7 @@ void setup() {
   nh.subscribe(subRearRightMotorCmd);
   
   InitializeIMU();
+  //InitializeGPS();
   rosInitialized = true;
 }
 
@@ -171,49 +189,76 @@ void setup() {
 void publishIMU()
 {
   imu::Vector<3> accel = bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
+  imu::Vector<3> linear_accel = bno.getVector(Adafruit_BNO055::VECTOR_LINEARACCEL);
   imu::Vector<3> gyro = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE );
   imu::Quaternion quat = bno.getQuat();
   imu::Vector<3> mag = bno.getVector(Adafruit_BNO055::VECTOR_MAGNETOMETER);
-  //int8_t temp = bno.getTemp();
+  int8_t temp = bno.getTemp();
 
-  imuMsg.linear_acceleration.x = accel.x();
-  imuMsg.linear_acceleration.y = accel.y();
-  imuMsg.linear_acceleration.z = accel.z();
-  //imuMsg.linear_acceleration_covariance = { 0.04 , 0 , 0, 0 , 0.04, 0, 0 , 0 , 0.04 };
-  imuMsg.linear_acceleration_covariance[0] = 0.04;
-  imuMsg.linear_acceleration_covariance[4] = 0.04;
-  imuMsg.linear_acceleration_covariance[8] = 0.04;
-
- 
-  imuMsg.angular_velocity.x = gyro.x();
-  imuMsg.angular_velocity.y = gyro.y();
-  imuMsg.angular_velocity.z = gyro.z();
-  //imuMsg.angular_velocity_covariance = { 0.02, 0 , 0, 0 , 0.02, 0, 0 , 0 , 0.02 };
-  imuMsg.angular_velocity_covariance[0] = 0.02;
-  imuMsg.angular_velocity_covariance[4] = 0.02;
-  imuMsg.angular_velocity_covariance[8] = 0.02;
-
-  imuMsg.orientation.x = quat.x();
-  imuMsg.orientation.y = quat.y();
-  imuMsg.orientation.z = quat.z();
-  imuMsg.orientation.w = quat.w();
-  //imuMsg.orientation_covariance = { 0.0025 , 0 , 0, 0, 0.0025, 0, 0, 0, 0.0025 };
-  imuMsg.orientation_covariance[0] = 0.0025;
-  imuMsg.orientation_covariance[4] = 0.0025;
-  imuMsg.orientation_covariance[8] = 0.0025;
 
   char id[] = "imu_link";
-  imuMsg.header.frame_id = id;
-  imuMsg.header.stamp=nh.now();
-  imuMsg.header.seq = seq;
+  imuRawMsg.header.frame_id = id;
+  imuRawMsg.header.stamp=nh.now();
+  imuRawMsg.header.seq = seq;
   seq = seq + 1;
-  pubIMU.publish(&imuMsg);
 
+  imuRawMsg.linear_acceleration.x = accel.x();
+  imuRawMsg.linear_acceleration.y = accel.y();
+  imuRawMsg.linear_acceleration.z = accel.z();
+  imuRawMsg.linear_acceleration_covariance[0] = -1;
+ 
+  imuRawMsg.angular_velocity.x = gyro.x();
+  imuRawMsg.angular_velocity.y = gyro.y();
+  imuRawMsg.angular_velocity.z = gyro.z();
+  imuRawMsg.angular_velocity_covariance[0] = -1;
+  
+  pubIMURaw.publish(&imuRawMsg);
+
+  
+  
+  imuFilteredMsg.header.frame_id = id;
+  imuFilteredMsg.header.stamp=nh.now();
+  imuFilteredMsg.header.seq = seq;
+  seq = seq + 1;
+  
+  imuFilteredMsg.orientation.x = quat.x();
+  imuFilteredMsg.orientation.y = quat.y();
+  imuFilteredMsg.orientation.z = quat.z();
+  imuFilteredMsg.orientation.w = quat.w();  
+  imuFilteredMsg.orientation_covariance[0] = -1;
+
+  imuFilteredMsg.linear_acceleration.x = linear_accel.x();
+  imuFilteredMsg.linear_acceleration.y = linear_accel.y();
+  imuFilteredMsg.linear_acceleration.z = linear_accel.z();
+  imuFilteredMsg.linear_acceleration_covariance[0] = -1;
+  
+  imuFilteredMsg.angular_velocity.x = gyro.x();
+  imuFilteredMsg.angular_velocity.y = gyro.y();
+  imuFilteredMsg.angular_velocity.z = gyro.z();
+  imuFilteredMsg.angular_velocity_covariance[0] = -1;
+ 
+  pubIMUFiltered.publish(&imuFilteredMsg);
+
+
+  magMsg.header.frame_id = id;
+  magMsg.header.stamp=nh.now();
+  magMsg.header.seq = seq;
+  seq = seq + 1;
   magMsg.magnetic_field.x = mag.x() / 1000000.0;
   magMsg.magnetic_field.y = mag.y() / 1000000.0;
   magMsg.magnetic_field.z = mag.z()/ 1000000.0;
 
   pubMag.publish(&magMsg);
+
+
+  tempMsg.header.frame_id = id;
+  tempMsg.header.stamp=nh.now();
+  tempMsg.header.seq = seq;
+  seq = seq + 1;
+  tempMsg.temperature = temp;
+  
+  pubTemp.publish(&tempMsg);
+  
 }
 
 
@@ -255,6 +300,18 @@ void updateMotorInfo()
 
   bool ret1 =  roboclaw.ReadCurrents(ROBOCLAW_FRONT_ID, currentFrontRight, currentFrontLeft);
   bool ret2 =  roboclaw.ReadCurrents(ROBOCLAW_REAR_ID, currentRearRight, currentRearLeft);
+
+  if (ret1 == false)
+  {
+    currentFrontRight = -1.0;
+    currentFrontLeft = -1.0;
+  }
+
+  if (ret2 == false)
+  {
+    currentRearRight = -1.0;  
+    currentRearLeft = -1.0;
+  }
   
 
   voltageFrontMainVal.data = (float)batteryFrontMainVoltage / 10.0f;
@@ -286,6 +343,14 @@ void loop() {
   if (rosInitialized == true)
     checkTimers();
 
+  
+  /*GPS.read();
+
+  if (GPS.newNMEAreceived()) 
+  {
+    if (!GPS.parse(GPS.lastNMEA()))
+      return;
+  }*/
   nh.spinOnce();
-  //delay(1);
+  delay(1);
 }

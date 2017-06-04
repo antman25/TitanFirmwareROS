@@ -1,5 +1,6 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
+#include <Adafruit_GPS.h>
 #include <utility/imumaths.h>
 
 #include <ros.h>
@@ -12,6 +13,7 @@
 
 #include <sensor_msgs/Imu.h>
 #include <sensor_msgs/MagneticField.h>
+#include <sensor_msgs/Temperature.h>
 
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/Vector3.h>
@@ -27,8 +29,10 @@
 #include "RoboClaw.h"
 
 ros::NodeHandle nh;
-sensor_msgs::Imu imuMsg;
+sensor_msgs::Imu imuRawMsg;
+sensor_msgs::Imu imuFilteredMsg;
 sensor_msgs::MagneticField magMsg;
+sensor_msgs::Temperature tempMsg;
 
 std_msgs::String debug;
 
@@ -48,8 +52,11 @@ std_msgs::Float32 currentFrontRightVal;
 std_msgs::Float32 currentRearLeftVal;
 std_msgs::Float32 currentRearRightVal;
 
-ros::Publisher pubIMU("imu/data_raw", &imuMsg);
+ros::Publisher pubIMURaw("imu/raw", &imuRawMsg);
+ros::Publisher pubIMUFiltered("imu/data", &imuFilteredMsg);
 ros::Publisher pubMag("imu/mag", &magMsg);
+ros::Publisher pubTemp("imu/temp", &tempMsg);
+
 ros::Publisher pubDebug("debug", &debug);
 
 
@@ -65,14 +72,15 @@ ros::Publisher pubVoltageFrontLogic("voltage_front_logic", &voltageFrontLogicVal
 ros::Publisher pubVoltageRearLogic("voltage_rear_logic", &voltageRearLogicVal);
 
 ros::Publisher pubCurrentFrontLeft("current_front_left", &currentFrontLeftVal);
-ros::Publisher pubCurrentFrontRight("current_rear_right", &currentFrontRightVal);
-ros::Publisher pubCurrentRearLeft("current_front_left", &currentRearLeftVal);
+ros::Publisher pubCurrentFrontRight("current_front_right", &currentFrontRightVal);
+ros::Publisher pubCurrentRearLeft("current_rear_left", &currentRearLeftVal);
 ros::Publisher pubCurrentRearRight("current_rear_right", &currentRearRightVal);
 
 
 
 Adafruit_BNO055 bno = Adafruit_BNO055();
 RoboClaw roboclaw(&Serial1,10000);
+Adafruit_GPS GPS(&Serial3);
 
 long seq = 0;
 bool rosInitialized = false;
@@ -101,4 +109,9 @@ int spFrontLeftMotor = 0;
 int spFrontRightMotor = 0;
 int spRearLeftMotor = 0;
 int spRearRightMotor = 0;
+
+
+void InitializeIMU();
+void InitializeGPS();
+void publishDebug();
 
