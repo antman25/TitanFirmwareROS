@@ -1,6 +1,7 @@
 #include "common.h"
 
 
+
 void InitializeIMU()
 {
   if(!bno.begin())
@@ -13,7 +14,22 @@ void InitializeIMU()
   bno.setExtCrystalUse(true);
 }
 
-void InitializeGPS()
+int getAngleTime1(double angle)
+{
+  return map(angle, -180, 180, 900, 2350);     // scale it to use it with the servo (value between 0 and 180) 
+}
+
+int getAngleTime2(double angle)
+{
+  return map(angle, -180, 180, 850, 2250);     // scale it to use it with the servo (value between 0 and 180) 
+}
+
+int getAngleTime3(double angle)
+{
+  return map(angle, -90, 90, 850, 2200);     // scale it to use it with the servo (value between 0 and 180) 
+}
+
+/*void InitializeGPS()
 {
   GPS.begin(115200);
   //GPS.sendCommand(PMTK_SET_BAUD_115200);
@@ -24,51 +40,49 @@ void InitializeGPS()
   GPS.sendCommand(PGCMD_ANTENNA);
 
   delay(1000);
-}
+}*/
 
 
 void publishDebug()
 {
-  char output[80];
+  //char output[80];
   
-  sprintf(output,"%i-%i-%i  %i:%i:%i ** %f - %f",GPS.month, GPS.day, GPS.year, GPS.hour, GPS.minute, GPS.seconds,(float)GPS.lat,(float)GPS.lon);
+  //sprintf(output,"%i-%i-%i  %i:%i:%i ** %f - %f",GPS.month, GPS.day, GPS.year, GPS.hour, GPS.minute, GPS.seconds,(float)GPS.lat,(float)GPS.lon);
   
   //sprintf(output, "Heading: %f - %f - %f\nLeft Setpoint: %f\nLeft Output: %f\nLeftVel: %f\nRight Setpoint: %f\nRight Output: %f\nRightVel: %f\n",  (float)currentHeading, sin(currentHeading / 2.0), cos(currentHeading / 2.0),(float)setpointLeftVel,(float)motorLeftOutput, (float)currentLeftVel, (float)setpointRightVel,(float)motorRightOutput,(float)currentRightVel);
   //sprintf(output,"Left: %f  -- Right: %f\n",motorLeftOutput,motorRightOutput);
   //sprintf(output,"%i - %i - %i - %i\n", spFrontLeftMotor, spFrontRightMotor, spRearLeftMotor, spRearRightMotor);
-  debug.data = output;
-  pubDebug.publish( &debug );
+  //debug.data = output;
+  //pubDebug.publish( &debug );
 }
 
 void setFrontLeftSpeed(int speed)
 {
-  roboclaw.SpeedM2(ROBOCLAW_FRONT_ID,speed);
-}
-
-/*long getFrontLeftEncoder()
-{
-  //roboclaw.SpeedM2(ROBOCLAW_FRONT_ID,speed);
-}*/
-
-void setFrontRightSpeed(int speed)
-{
   roboclaw.SpeedM1(ROBOCLAW_FRONT_ID,speed);
 }
 
+void setFrontRightSpeed(int speed)
+{
+  roboclaw.SpeedM2(ROBOCLAW_FRONT_ID,speed);
+}
+
+void setRearLeftSpeed(int speed)
+{
+  roboclaw.SpeedM1(ROBOCLAW_REAR_ID,speed);
+}
+
+void setRearRightSpeed(int speed)
+{
+  roboclaw.SpeedM2(ROBOCLAW_REAR_ID,speed);
+}
+
+
 void updateMotors()
 {
-  //0x80, M2 = Front Left
   setFrontLeftSpeed(spFrontLeftMotor);
-  
-  //0x80, M1 = Front Right
-  //roboclaw.SpeedM1(ROBOCLAW_FRONT_ID,spFrontRightMotor);
   setFrontRightSpeed(spFrontRightMotor);
-  
-  //0x81, M2 = Front Left
-  roboclaw.SpeedM2(ROBOCLAW_REAR_ID,spRearLeftMotor);
-  
-  //0x81, M1 = Front Right
-  roboclaw.SpeedM1(ROBOCLAW_REAR_ID,spRearRightMotor);
+  setRearLeftSpeed(spRearLeftMotor);
+  setRearRightSpeed(spRearRightMotor);
 }
 
 void cbFrontLeftMotorCmd( const std_msgs::Int64 &msg)
@@ -84,7 +98,7 @@ void cbFrontRightMotorCmd( const std_msgs::Int64 &msg)
 
 void cbRearLeftMotorCmd( const std_msgs::Int64 &msg)
 {
-  spRearLeftMotor = (int)-msg.data;
+  spRearLeftMotor = (int)msg.data;
   timerMotorTimeout = millis();
 }
 void cbRearRightMotorCmd( const std_msgs::Int64 &msg)
@@ -93,6 +107,23 @@ void cbRearRightMotorCmd( const std_msgs::Int64 &msg)
   timerMotorTimeout = millis();
 }
 
+void cbServo1Cmd( const std_msgs::Float32 &msg)
+{
+  spServo1 = (float)msg.data;
+  servo1.write(getAngleTime1(spServo1)); 
+}
+
+void cbServo2Cmd( const std_msgs::Float32 &msg)
+{
+  spServo2 = (float)msg.data;
+  servo2.write(getAngleTime2(spServo2));
+}
+
+void cbServo3Cmd( const std_msgs::Float32 &msg)
+{
+  spServo3 = (float)msg.data;
+  servo3.write(getAngleTime3(spServo3));
+}
 
 void checkTimers()
 {
@@ -127,7 +158,7 @@ void checkTimers()
   {
    timerIMU = millis();
    
-   publishIMU();
+   //publishIMU();
   }
 
   if (millis() - timerDebug > UPDATE_RATE_DEBUG)
@@ -144,14 +175,28 @@ ros::Subscriber<std_msgs::Int64> subFrontRightMotorCmd("vel_sp_fr_wheel", cbFron
 ros::Subscriber<std_msgs::Int64> subRearLeftMotorCmd("vel_sp_rl_wheel", cbRearLeftMotorCmd);
 ros::Subscriber<std_msgs::Int64> subRearRightMotorCmd("vel_sp_rr_wheel", cbRearRightMotorCmd);
 
-
+ros::Subscriber<std_msgs::Float32> subServo1Cmd("servo1_angle_cmd", cbServo1Cmd);
+ros::Subscriber<std_msgs::Float32> subServo2Cmd("servo2_angle_cmd", cbServo2Cmd);
+ros::Subscriber<std_msgs::Float32> subServo3Cmd("servo3_angle_cmd", cbServo3Cmd);
 
 void setup() {
+  
+  servo1.attach(5,850,2350);  // attaches the servo on pin 9 to the servo object 
+  servo2.attach(6,850,2350);  // attaches the servo on pin 9 to the servo object 
+  servo3.attach(4,850,2350);  // attaches the servo on pin 9 to the servo object 
+
+  servo1.write(getAngleTime1(0)); 
+  servo2.write(getAngleTime2(0));
+  servo3.write(getAngleTime3(0));
+  
+  
   roboclaw.begin(57600);
   
   nh.initNode();
-  //broadcaster.init(nh);
+  //nh_bluetooth.initNode();
 
+  //nh_bluetooth.advertise(chatter);
+  
   nh.advertise(pubFrontLeftEncoder);
   nh.advertise(pubFrontRightEncoder);
   nh.advertise(pubRearLeftEncoder);
@@ -179,8 +224,12 @@ void setup() {
   nh.subscribe(subFrontRightMotorCmd);
   nh.subscribe(subRearLeftMotorCmd);
   nh.subscribe(subRearRightMotorCmd);
+
+  nh.subscribe(subServo1Cmd);
+  nh.subscribe(subServo2Cmd);
+  nh.subscribe(subServo3Cmd);
   
-  InitializeIMU();
+  //InitializeIMU();
   //InitializeGPS();
   rosInitialized = true;
 }
@@ -266,10 +315,10 @@ void updateEncoders()
 {
   uint8_t status1,status2,status3,status4;
   bool valid1,valid2,valid3,valid4;  
-  int32_t encFrontLeft = roboclaw.ReadEncM2(ROBOCLAW_FRONT_ID, &status1, &valid1);
-  int32_t encFrontRight = roboclaw.ReadEncM1(ROBOCLAW_FRONT_ID, &status2, &valid2);
-  int32_t encRearLeft = roboclaw.ReadEncM2(ROBOCLAW_REAR_ID, &status3, &valid3);
-  int32_t encRearRight = roboclaw.ReadEncM1(ROBOCLAW_REAR_ID, &status4, &valid4);
+  int32_t encFrontLeft = roboclaw.ReadEncM1(ROBOCLAW_FRONT_ID, &status1, &valid1);
+  int32_t encFrontRight = roboclaw.ReadEncM2(ROBOCLAW_FRONT_ID, &status2, &valid2);
+  int32_t encRearLeft = roboclaw.ReadEncM1(ROBOCLAW_REAR_ID, &status3, &valid3);
+  int32_t encRearRight = roboclaw.ReadEncM2(ROBOCLAW_REAR_ID, &status4, &valid4);
 
   encoderFrontLeftVal.data = encFrontLeft;
   pubFrontLeftEncoder.publish(&encoderFrontLeftVal);
@@ -277,7 +326,7 @@ void updateEncoders()
   encoderFrontRightVal.data = encFrontRight;
   pubFrontRightEncoder.publish(&encoderFrontRightVal);
 
-  encoderRearLeftVal.data = -encRearLeft;
+  encoderRearLeftVal.data = encRearLeft;
   pubRearLeftEncoder.publish(&encoderRearLeftVal);
 
   encoderRearRightVal.data = encRearRight;
@@ -342,7 +391,8 @@ void updateMotorInfo()
 void loop() {
   if (rosInitialized == true)
     checkTimers();
-
+  //str_msg.data = hello;
+  //chatter.publish( &str_msg );
   
   /*GPS.read();
 

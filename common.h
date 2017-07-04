@@ -4,6 +4,7 @@
 #include <utility/imumaths.h>
 
 #include <ros.h>
+#include "ros.h"
 #include <ros/time.h>
 
 #include <tf/transform_broadcaster.h>
@@ -27,8 +28,19 @@
 #include <std_msgs/Float32.h>
 #include <std_msgs/Float64.h>
 #include "RoboClaw.h"
+#include "HWSerial.h"
+
+#include <Servo.h> 
+ 
+Servo servo1;  // create servo object to control a servo 
+Servo servo2;                
+Servo servo3;
+ 
 
 ros::NodeHandle nh;
+//ros::NodeHandle_<HWSerial> nh_bluetooth;
+
+
 sensor_msgs::Imu imuRawMsg;
 sensor_msgs::Imu imuFilteredMsg;
 sensor_msgs::MagneticField magMsg;
@@ -80,7 +92,7 @@ ros::Publisher pubCurrentRearRight("current_rear_right", &currentRearRightVal);
 
 Adafruit_BNO055 bno = Adafruit_BNO055();
 RoboClaw roboclaw(&Serial1,10000);
-Adafruit_GPS GPS(&Serial3);
+//Adafruit_GPS GPS(&Serial3);
 
 long seq = 0;
 bool rosInitialized = false;
@@ -94,8 +106,22 @@ bool rosInitialized = false;
 
 #define TIMEOUT_MOTOR_CMD         1000
 
-#define ROBOCLAW_FRONT_ID         0x80
-#define ROBOCLAW_REAR_ID          0x81
+#define ROBOCLAW_FRONT_ID         0x81
+#define ROBOCLAW_REAR_ID          0x80
+
+#define MOTOR_KP                  6400
+#define MOTOR_KI                  2200
+#define MOTOR_KD                  0
+#define MOTOR_QPPS                6400 
+
+/*
+ * Motor 
+KP = 6400.00
+KI = 2200.00
+KD = 0.00
+qpps = 6400
+
+ */
 
 
 long timerIMU = millis();
@@ -109,6 +135,10 @@ int spFrontLeftMotor = 0;
 int spFrontRightMotor = 0;
 int spRearLeftMotor = 0;
 int spRearRightMotor = 0;
+
+float spServo1 = 0.0f;
+float spServo2 = 0.0f;
+float spServo3 = 0.0f;
 
 
 void InitializeIMU();
