@@ -1,6 +1,12 @@
+#include <Wire.h>
+
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
-#include <Adafruit_GPS.h>
+//#include <Adafruit_GPS.h>
+#include <Adafruit_INA219.h>
+#include <MPU9250.h>
+
+
 #include <utility/imumaths.h>
 
 #include <ros.h>
@@ -28,21 +34,21 @@
 #include <std_msgs/Float32.h>
 #include <std_msgs/Float64.h>
 #include "RoboClaw.h"
-#include "HWSerial.h"
+//#include "HWSerial.h"
 
 #include <Servo.h> 
  
 Servo servo1;  // create servo object to control a servo 
 Servo servo2;                
 Servo servo3;
- 
+Servo servo4; 
 
 ros::NodeHandle nh;
 //ros::NodeHandle_<HWSerial> nh_bluetooth;
 
 
 sensor_msgs::Imu imuRawMsg;
-sensor_msgs::Imu imuFilteredMsg;
+//sensor_msgs::Imu imuFilteredMsg;
 sensor_msgs::MagneticField magMsg;
 sensor_msgs::Temperature tempMsg;
 
@@ -64,8 +70,8 @@ std_msgs::Float32 currentFrontRightVal;
 std_msgs::Float32 currentRearLeftVal;
 std_msgs::Float32 currentRearRightVal;
 
-ros::Publisher pubIMURaw("imu/raw", &imuRawMsg);
-ros::Publisher pubIMUFiltered("imu/data", &imuFilteredMsg);
+ros::Publisher pubIMURaw("imu/data_raw", &imuRawMsg);
+//ros::Publisher pubIMUFiltered("imu/data", &imuFilteredMsg);
 ros::Publisher pubMag("imu/mag", &magMsg);
 ros::Publisher pubTemp("imu/temp", &tempMsg);
 
@@ -90,9 +96,11 @@ ros::Publisher pubCurrentRearRight("current_rear_right", &currentRearRightVal);
 
 
 
-Adafruit_BNO055 bno = Adafruit_BNO055();
+//Adafruit_BNO055 bno = Adafruit_BNO055();
+MPU9250 IMU(Wire,0x68);
 RoboClaw roboclaw(&Serial1,10000);
 //Adafruit_GPS GPS(&Serial3);
+Adafruit_INA219 ina219;
 
 long seq = 0;
 bool rosInitialized = false;
@@ -103,16 +111,42 @@ bool rosInitialized = false;
 #define UPDATE_RATE_DEBUG         1000
 #define UPDATE_RATE_MOTOR         50
 #define UPDATE_RATE_MOTOR_INFO    200
+#define UPDATE_RATE_STATUS_LED    50
 
 #define TIMEOUT_MOTOR_CMD         1000
 
-#define ROBOCLAW_FRONT_ID         0x81
-#define ROBOCLAW_REAR_ID          0x80
+#define ROBOCLAW_FRONT_ID         0x80
+#define ROBOCLAW_REAR_ID          0x81
 
 #define MOTOR_KP                  6400
 #define MOTOR_KI                  2200
 #define MOTOR_KD                  0
 #define MOTOR_QPPS                6400 
+
+#define PIN_LED_RED                3 
+#define PIN_LED_GREEN              4
+#define PIN_LED_BLUE               5
+#define PIN_PWM_1                  20
+#define PIN_PWM_2                  21
+#define PIN_PWM_3                  22
+#define PIN_PWM_4                  23
+
+#define INVERT_MOTORS               0
+
+#define BAT_CELLS                 4
+#define BAT_FULL                  4.2 * BAT_CELLS
+#define BAT_EMPTY                 3.5 * BAT_CELLS
+
+
+#define BAT_SLOPE                 (BAT_FULL-BAT_EMPTY)/100.0
+#define BAT_100                   BAT_FULL
+#define BAT_80                    (80.0 * BAT_SLOPE) + BAT_EMPTY      
+#define BAT_60                    (60.0 * BAT_SLOPE) + BAT_EMPTY   
+#define BAT_40                    (40.0 * BAT_SLOPE) + BAT_EMPTY   
+#define BAT_20                    (20.0 * BAT_SLOPE) + BAT_EMPTY   
+#define BAT_0                     BAT_EMPTY
+
+
 
 /*
  * Motor 
@@ -130,6 +164,7 @@ long timerEncoder = millis();
 long timerMotorUpdate = millis();
 long timerMotorTimeout = millis();
 long timerMotorInfo = millis();
+long timerStatusLED = millis();
 
 int spFrontLeftMotor = 0;
 int spFrontRightMotor = 0;
@@ -139,6 +174,7 @@ int spRearRightMotor = 0;
 float spServo1 = 0.0f;
 float spServo2 = 0.0f;
 float spServo3 = 0.0f;
+float spServo4 = 0.0f;
 
 
 void InitializeIMU();
