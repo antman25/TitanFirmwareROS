@@ -1,30 +1,12 @@
 #include <Wire.h>
 
-#include <Adafruit_Sensor.h>
-#include <Adafruit_BNO055.h>
-//#include <Adafruit_GPS.h>
-#include <Adafruit_INA219.h>
-#include <MPU9250.h>
-
-
-#include <utility/imumaths.h>
+#include "RoboClaw.h"
 
 #include <ros.h>
 #include "ros.h"
 #include <ros/time.h>
+#include <Adafruit_INA219.h>
 
-#include <tf/transform_broadcaster.h>
-#include <tf/tf.h>
-
- #include <nav_msgs/Odometry.h>
-
-#include <sensor_msgs/Imu.h>
-#include <sensor_msgs/MagneticField.h>
-#include <sensor_msgs/Temperature.h>
-
-#include <geometry_msgs/TransformStamped.h>
-#include <geometry_msgs/Vector3.h>
-#include <geometry_msgs/Quaternion.h> 
 
 #include <std_msgs/String.h>
 #include <std_msgs/UInt16.h>
@@ -33,10 +15,13 @@
 #include <std_msgs/Int64.h>
 #include <std_msgs/Float32.h>
 #include <std_msgs/Float64.h>
-#include "RoboClaw.h"
-//#include "HWSerial.h"
+#include <titan_msgs/Status.h>
+#include <titan_msgs/ArmCmd.h>
+#include <titan_msgs/ArmStatus.h>
 
 #include <Servo.h> 
+
+RoboClaw roboclaw(&Serial1,10000);
  
 Servo servo1;  // create servo object to control a servo 
 Servo servo2;                
@@ -44,84 +29,28 @@ Servo servo3;
 Servo servo4; 
 
 ros::NodeHandle nh;
-//ros::NodeHandle_<HWSerial> nh_bluetooth;
 
-
-sensor_msgs::Imu imuRawMsg;
-//sensor_msgs::Imu imuFilteredMsg;
-sensor_msgs::MagneticField magMsg;
-sensor_msgs::Temperature tempMsg;
+float battery_voltage=0.0f;
 
 std_msgs::String debug;
-
-std_msgs::Int64 encoderFrontLeftVal;
-std_msgs::Int64 encoderFrontRightVal;
-std_msgs::Int64 encoderRearLeftVal;
-std_msgs::Int64 encoderRearRightVal;
-
-std_msgs::Float32 voltageFrontLogicVal;
-std_msgs::Float32 voltageRearLogicVal;
-
-std_msgs::Float32 voltageFrontMainVal;
-std_msgs::Float32 voltageRearMainVal;
-
-std_msgs::Float32 currentFrontLeftVal;
-std_msgs::Float32 currentFrontRightVal;
-std_msgs::Float32 currentRearLeftVal;
-std_msgs::Float32 currentRearRightVal;
-
-ros::Publisher pubIMURaw("imu/data_raw", &imuRawMsg);
-//ros::Publisher pubIMUFiltered("imu/data", &imuFilteredMsg);
-ros::Publisher pubMag("imu/mag", &magMsg);
-ros::Publisher pubTemp("imu/temp", &tempMsg);
+titan_msgs::ArmStatus arm_status;
 
 ros::Publisher pubDebug("debug", &debug);
-
-
-ros::Publisher pubFrontLeftEncoder("encoder_fl_wheel", &encoderFrontLeftVal);
-ros::Publisher pubFrontRightEncoder("encoder_fr_wheel", &encoderFrontRightVal);
-ros::Publisher pubRearLeftEncoder("encoder_rl_wheel", &encoderRearLeftVal);
-ros::Publisher pubRearRightEncoder("encoder_rr_wheel", &encoderRearRightVal);
-
-ros::Publisher pubVoltageFrontMain("voltage_front_main", &voltageFrontMainVal);
-ros::Publisher pubVoltageRearMain("voltage_rear_main", &voltageRearMainVal);
-
-ros::Publisher pubVoltageFrontLogic("voltage_front_logic", &voltageFrontLogicVal);
-ros::Publisher pubVoltageRearLogic("voltage_rear_logic", &voltageRearLogicVal);
-
-ros::Publisher pubCurrentFrontLeft("current_front_left", &currentFrontLeftVal);
-ros::Publisher pubCurrentFrontRight("current_front_right", &currentFrontRightVal);
-ros::Publisher pubCurrentRearLeft("current_rear_left", &currentRearLeftVal);
-ros::Publisher pubCurrentRearRight("current_rear_right", &currentRearRightVal);
-
-
+ros::Publisher pubArmStatus("arm_status", &arm_status);
 
 //Adafruit_BNO055 bno = Adafruit_BNO055();
-MPU9250 IMU(Wire,0x68);
-RoboClaw roboclaw(&Serial1,10000);
-//Adafruit_GPS GPS(&Serial3);
-Adafruit_INA219 ina219;
 
 long seq = 0;
 bool rosInitialized = false;
+bool pump_state = false;
 
 
-#define UPDATE_RATE_IMU           50
-#define UPDATE_RATE_ENCODER       50
+
 #define UPDATE_RATE_DEBUG         1000
-#define UPDATE_RATE_MOTOR         50
-#define UPDATE_RATE_MOTOR_INFO    200
 #define UPDATE_RATE_STATUS_LED    50
+#define UPDATE_RATE_MOTOR         50
+#define UPDATE_RATE_MOTOR_STATUS  50
 
-#define TIMEOUT_MOTOR_CMD         1000
-
-#define ROBOCLAW_FRONT_ID         0x80
-#define ROBOCLAW_REAR_ID          0x81
-
-#define MOTOR_KP                  6400
-#define MOTOR_KI                  2200
-#define MOTOR_KD                  0
-#define MOTOR_QPPS                6400 
 
 #define PIN_LED_RED                3 
 #define PIN_LED_GREEN              4
@@ -131,11 +60,10 @@ bool rosInitialized = false;
 #define PIN_PWM_3                  22
 #define PIN_PWM_4                  23
 
-#define INVERT_MOTORS               0
 
-#define BAT_CELLS                 4
-#define BAT_FULL                  4.2 * BAT_CELLS
-#define BAT_EMPTY                 3.5 * BAT_CELLS
+#define BAT_CELLS                 6
+#define BAT_FULL                  2.2 * BAT_CELLS
+#define BAT_EMPTY                 1.9 * BAT_CELLS
 
 
 #define BAT_SLOPE                 (BAT_FULL-BAT_EMPTY)/100.0
@@ -146,8 +74,15 @@ bool rosInitialized = false;
 #define BAT_20                    (20.0 * BAT_SLOPE) + BAT_EMPTY   
 #define BAT_0                     BAT_EMPTY
 
+#define ROBOCLAW_ID               128
+
+#define ENC_TOLERANCE             50
+
+#define PIN_PUMPS                 2
 
 
+#define Z_AXIS_TICKS_PER_M        1284.0 / 0.008
+#define Z_AXIS_M_PER_TICK        0.008 / 1284.0
 /*
  * Motor 
 KP = 6400.00
@@ -157,27 +92,24 @@ qpps = 6400
 
  */
 
+Adafruit_INA219 ina219;
 
-long timerIMU = millis();
 long timerDebug = millis();
-long timerEncoder = millis();
-long timerMotorUpdate = millis();
-long timerMotorTimeout = millis();
-long timerMotorInfo = millis();
 long timerStatusLED = millis();
-
-int spFrontLeftMotor = 0;
-int spFrontRightMotor = 0;
-int spRearLeftMotor = 0;
-int spRearRightMotor = 0;
+long timerRefreshMotor = millis();
+long timerMotorStatus = millis();
 
 float spServo1 = 0.0f;
 float spServo2 = 0.0f;
 float spServo3 = 0.0f;
-float spServo4 = 0.0f;
 
 
-void InitializeIMU();
-void InitializeGPS();
+float curServo1 = 0.0f;
+float curServo2 = 0.0f;
+float curServo3 = 0.0f;
+
+
+int32_t currentEncoder = 0;
+int32_t setpointEncoder = 0;
 void publishDebug();
-
+void publishMotorStatus();
